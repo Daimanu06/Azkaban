@@ -1,0 +1,9 @@
+{
+    "prefix": "!",
+    "banProbability": 0.65,
+    "biterBit": 0.1,
+    "banRole": "Mute",
+    "thinkingDuration": 3000,
+    "banDuration": 60000,
+    "autoban": false
+}
