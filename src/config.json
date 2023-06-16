@@ -5,5 +5,6 @@
     "banRole": "Mute",
     "thinkingDuration": 3000,
     "banDuration": 60000,
+    "cooldownDuration": 60000,
     "autoban": false
 }

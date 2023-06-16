@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, User } = require('discord.js');
 const client = new Client({ intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
@@ -40,41 +40,57 @@ async function registerGuild(guild) {
     const reponsePromise = Promise.allSettled([azkaIdPromise, banRolePromise]);
     const response = await reponsePromise;
 
-    const victimUser = response[0].value;
+    const defaultVictimGuildMember = response[0].value;
     const banRole = guild.roles.cache.find(role => role.name === config.banRole);
 
     guilds[guild.id] = {
-        "guildId":  guild.id,
-        "victimUser": victimUser,
+        "name": guild.name,
+        "id":  guild.id,
+        "defaultVictimGuildMember": defaultVictimGuildMember,
         "banRole":  banRole,
-        "lastUseDate": new Date()
+        "lastUseDate": 0
     };
 
     log(`guild "${guild.name}" successfully registered`);
-    log(`user ${victimUser} identified`);
+    log(`default victim for this guild will be ${defaultVictimGuildMember.nickname}`);
 
 }
 
 function displayHelp(channel) {
     channel.send(
-`commandes valides :
+`Mute une personne de votre choix, ou Azka par défaut.
+Commandes valides :
+\`\`\`!azkaban
 !azkaban @cible_à_ban
-!azkaban aide
-    `);
+!azkaban aide\`\`\``);
 }
 
 /**
  * When someone triggers a ban…
+ *
+ * Make sure the command is not spammed,
+ * Determine the outcome of the spin and apply it.
  * @param {*} message
  */
-function azkaBanTrigger(message) {
-    log("=> azkaBanTrigger");
+function azkaBanTrigger(guild, channel, authorGuildMember, victimGuildMember) {
+    log(`=> azkaBanTrigger in "${guild.name}/${channel.name}" by "${authorGuildMember.nickname}" to "${victimGuildMember.nickname}"`);
 
-    message.channel.send(`${message.author} a déclenché la roue d'Azkaban.`); //@
-    setTimeout(sendTyping, 500, message); //timeout sinon on n'a pas le sendTyping
+    const now = Date.now();
+    if (guild.lastUseDate && ((now - guild.lastUseDate) < config.cooldownDuration)) {
+        channel.send("Le marteau du ban est satisfait. Mais sa faim revient toutes les minutes.");
+        return;
+    }
+
+    guild.lastUseDate = now;
+    channel.send(`${authorGuildMember.nickname} a déclenché la roue d'Azkaban sur <@${victimGuildMember.id}>.`);
+    setTimeout(sendTyping, 500, channel); //timeout sinon on n'a pas le sendTyping
     let sentence = determineSentence();
 
-    applySentence(sentence, message);
+    const banRole = guild.banRole;
+    const banDuration = config.banDuration;
+    const thinkingDuration = config.thinkingDuration;
+
+    applySentence(sentence, channel, authorGuildMember, victimGuildMember, banRole, banDuration, thinkingDuration);
 }
 
 /**
@@ -84,40 +100,37 @@ function azkaBanTrigger(message) {
  *     - apply the ban when the image animation has ended
  *     - unban the user after a few minutes
  */
-function applySentence(sentence, message) {
-    guild = guilds[message.guildId];
+function applySentence(sentence, channel, authorGuildMember, victimGuildMember, banRole, banDuration, thinkingDuration) {
     switch(sentence) {
         case "ban":
             setTimeout(
-                () => ban(message.channel, guild.victimUser, guild.banRole),
-                config.thinkingDuration
+                () => ban(channel, victimGuildMember, banRole),
+                thinkingDuration
             );
-            setTimeout(unBan, config.banDuration, guild.victimUser, guild.banRole);
+            setTimeout(unBan, banDuration, channel, victimGuildMember, banRole);
             break;
         case "bitterbit":
             setTimeout(
-                () => biterBit(message.channel, message.member, guild.banRole),
-                config.thinkingDuration
+                () => biterBit(channel, authorGuildMember, banRole),
+                thinkingDuration
             );
-            setTimeout(unBan, config.banDuration, message.member, guild.banRole);
+            setTimeout(unBan, banDuration, channel, authorGuildMember, banRole);
             break;
         case "spare":
             setTimeout(
-                () => spare(message.channel),
-                config.thinkingDuration
+                () => spare(victimGuildMember, channel),
+                thinkingDuration
             );
             break;
     }
 }
 
-function noAutoBan(message) {
-    message.channel.send("Non mais t'as cru que tu pouvais t'autoban ?!");
+function noAutoBan(channel) {
+    channel.send("Non mais t'as cru que tu pouvais t'autoban ?!");
 }
 
-function sendTyping(message) {
-    log("=> sendTyping");
-
-    message.channel.sendTyping();
+function sendTyping(channel) {
+    channel.sendTyping();
 }
 
 /**
@@ -130,8 +143,6 @@ function sendTyping(message) {
  * @returns the decision, as a string
  */
 function determineSentence() {
-    log("=> determineSentence");
-
     const decision = Math.random();
     if (decision < config.banProbability) {
         return "ban";
@@ -143,28 +154,22 @@ function determineSentence() {
 }
 
 function ban(channel, userToBan, banRole) {
-    log("=> ban");
-
     channel.send("<:Peurin:1110871155134447667> BAN !! <:Peurin:1110871155134447667>");
     //message.channel.send("https://cdn.discordapp.com/attachments/831601905633067080/1074827238345810000/Azkaban.gif");
     userToBan.roles.add(banRole);
 }
 
 function biterBit(channel, userToBan, banRole) {
-    log("=> bitterBit");
-
     channel.send("<:Peurin:1110871155134447667> L'ARROSEUR ARROSÉ !! <:Peurin:1110871155134447667>");
     userToBan.roles.add(banRole);
 }
 
-function spare(channel) {
-    log("=> spare");
-
-    channel.send("Azka s'en tire bien cette fois, mais ce n'est que partie remise <:Yesocha:1110871843579101239>");
+function spare(victimGuildMember, channel) {
+    channel.send(`${victimGuildMember.nickname || victimGuildMember.user.username} s'en tire bien cette fois, mais ce n'est que partie remise <:Yesocha:1110871843579101239>`);
 }
 
-function unBan(userToUnban, banRole) {
-    log("=> unBan");
+function unBan(channel, userToUnban, banRole) {
+    channel.send(`J'ai pitié de toi, ${userToUnban.nickname || userToUnban.user.username}. Je te libère de ton sort <:Peurin:1110871155134447667>`)
 
     userToUnban.roles.remove(banRole);
 }
@@ -196,12 +201,21 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    if (config.autoBan && (message.member.id == guilds[message.guild.id].victimUser)) {
-        noAutoBan(message);
+    let currentGuild = guilds[message.guild.id];
+    let victimGuildMember = currentGuild.defaultVictimGuildMember;
+
+    // if a user was mentionned
+    if (message.mentions.users.size > 0) {
+        userId = message.mentions.users.keys().next().value;
+        victimGuildMember = await message.guild.members.fetch(userId);
+    }
+
+    if (config.autoBan && (message.member.user.id == victimGuildMember.user.id)) {
+        noAutoBan(message.channel);
         return;
     }
 
-    azkaBanTrigger(message);
+    azkaBanTrigger(currentGuild, message.channel, message.member, victimGuildMember);
 
 });
 
